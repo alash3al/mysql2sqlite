@@ -34,6 +34,8 @@ var (
 )
 
 func init() {
+	flag.Parse()
+
 	mydsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?sql_mode=''", *flagMYSQLUser, *flagMYSQLPassword, *flagMYSQLHost, *flagMYSQLDBName)
 	mydb, err := sqlx.Open("mysql", mydsn)
 	if err != nil {
