@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -44,7 +45,7 @@ func init() {
 
 	mysqlConn = mydb
 
-	litedb, err := sqlx.Open("sqlite3", *flagSQLITE+"?cache=shared&_journal=memory")
+	litedb, err := sqlx.Open("sqlite3", *flagSQLITE+"?cache=shared&_journal=wal")
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -61,7 +62,7 @@ func main() {
 		log.Fatal(err.Error())
 	}
 
-	mainBar = pb.StartNew(len(tables)).Prefix(color.CyanString("⇨ Overall: "))
+	mainBar = pb.StartNew(len(tables)).Prefix(color.CyanString("⇨ Progress "))
 	wg := &sync.WaitGroup{}
 
 	for _, tb := range tables {
@@ -108,6 +109,10 @@ func getMYSQLTables() ([]string, error) {
 }
 
 func moveTable(tb string) error {
+	defer func() {
+		mainBar.Increment()
+	}()
+
 	var count uint64
 	mysqlConn.QueryRow("SELECT COUNT(*) FROM " + tb).Scan(&count)
 
@@ -118,33 +123,48 @@ func moveTable(tb string) error {
 
 	defer rows.Close()
 
-	mainBar.Increment()
-
 	if count < 1 {
 		return nil
 	}
 
-	subBar := pb.StartNew(int(count)).Prefix(color.GreenString("⇨ " + tb + ": "))
+	fields, _ := rows.Columns()
 
 	for rows.Next() {
-		subBar.Increment()
-		data := make(map[string]interface{})
-		if err := rows.MapScan(data); err != nil {
-			continue
+		args := make([]interface{}, len(fields))
+		for i := range fields {
+			var v interface{}
+			args[i] = &v
 		}
 
-		cols, vals, names := (func() (cols []string, vals []interface{}, names []string) {
-			for k, v := range data {
-				cols = append(cols, k)
-				vals = append(vals, v)
-				names = append(names, "?")
+		if err := rows.Scan(args...); err != nil {
+			return err
+		}
+
+		names := []string{}
+		for ii, val := range args {
+			t := reflect.TypeOf((*(val.(*interface{}))))
+			names = append(names, "?")
+			if nil == t {
+				args[ii] = nil
+				continue
 			}
-
-			return cols, vals, names
-		})()
-
-		sql := "INSERT INTO `" + (tb) + "`(`" + (strings.Join(cols, "`, `")) + "`) VALUES(" + (strings.Join(names, ",")) + ")"
-		sqliteConn.Exec(sql, vals...)
+			switch t.Kind() {
+			case reflect.Int64, reflect.Int32, reflect.Int:
+				args[ii] = (*(val.(*interface{}))).(int64)
+			case reflect.Float32, reflect.Float64:
+				args[ii] = (*(val.(*interface{}))).(float64)
+			case reflect.Slice:
+				if t.Elem().Kind() == reflect.Uint || t.Elem().Kind() == reflect.Uint8 {
+					args[ii] = string((*(val.(*interface{}))).([]uint8))
+				}
+			default:
+				args[ii] = (*(val.(*interface{}))).(string)
+			}
+		}
+		sql := "INSERT INTO `" + (tb) + "`(`" + (strings.Join(fields, "`, `")) + "`) VALUES(" + (strings.Join(names, ",")) + ")"
+		if _, err := sqliteConn.Exec(sql, args...); err != nil {
+			log.Println(err.Error())
+		}
 	}
 
 	return nil
