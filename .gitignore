@@ -1,3 +1,4 @@
 bin
 *.sqlite
 *.db
+.DS_Store

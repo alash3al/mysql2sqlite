@@ -4,7 +4,7 @@ MYSQL2SQLITE
 
 Download
 =========
-> download the binaries from the [releases](/releases) page
+> download the binaries from the [releases](https://github.com/alash3al/mysql2sqlite) page
 
 Author
 ======
